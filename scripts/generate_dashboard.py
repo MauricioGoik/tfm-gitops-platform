@@ -13,6 +13,7 @@ def parse_sarif(filepath):
     """Extrae findings de un fichero SARIF."""
     findings = []
     if not os.path.exists(filepath):
+        print(f"Warning: {filepath} no existe, saltando...")
         return findings
     try:
         with open(filepath) as f:
@@ -145,16 +146,21 @@ def generate_html(all_findings, commit, timestamp):
 </html>"""
 
 if __name__ == "__main__":
+    # Checkov genera results_sarif.sarif dentro de una carpeta
+    # con el nombre del fichero — bug conocido de bridgecrewio/checkov-action
     sarif_files = [
-        "trivy-image-sarif/trivy-image-results.sarif",
-        "trivy-iac-sarif/trivy-iac-results.sarif",
-        "checkov-results/checkov-terraform-results.sarif",
-        "checkov-results/checkov-k8s-results.sarif",
+        ("trivy-image-sarif/trivy-image-results.sarif", "trivy-image-results.sarif"),
+        ("trivy-iac-sarif/trivy-iac-results.sarif", "trivy-iac-results.sarif"),
+        ("checkov-results/checkov-terraform-results.sarif/results_sarif.sarif", "checkov-terraform-results.sarif"),
+        ("checkov-results/checkov-k8s-results.sarif/results_sarif.sarif", "checkov-k8s-results.sarif"),
+        ("checkov-results/checkov-dockerfile-results.sarif/results_sarif.sarif", "checkov-dockerfile-results.sarif"),
     ]
 
     all_findings = []
-    for f in sarif_files:
-        all_findings.extend(parse_sarif(f))
+    for filepath, label in sarif_files:
+        findings = parse_sarif(filepath)
+        print(f"{label}: {len(findings)} findings")
+        all_findings.extend(findings)
 
     commit = os.getenv("GITHUB_SHA", "local")
     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
@@ -164,4 +170,4 @@ if __name__ == "__main__":
     with open("index.html", "w") as f:
         f.write(html)
 
-    print(f"Dashboard generated: {len(all_findings)} findings")
+    print(f"Dashboard generado: {len(all_findings)} findings totales")
