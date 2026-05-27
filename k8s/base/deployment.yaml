@@ -15,17 +15,14 @@ spec:
       labels:
         app: demo-web
     spec:
-      # Nunca correr como root — política de seguridad
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
       containers:
         - name: demo-web
-          # Esta imagen la actualizará GitHub Actions en cada push
-          image: ghcr.io/mauriciogoik/demo-web:latest
+          image: ghcr.io/mauriciogoik/demo-web:sha-placeholder
           ports:
             - containerPort: 8080
-          # Resource limits obligatorios — otra política que enforcaremos
           resources:
             requests:
               memory: "64Mi"
@@ -33,7 +30,6 @@ spec:
             limits:
               memory: "128Mi"
               cpu: "100m"
-          # Health checks para que Kubernetes sepa si la app está sana
           livenessProbe:
             httpGet:
               path: /health

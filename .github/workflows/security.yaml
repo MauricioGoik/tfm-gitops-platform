@@ -241,6 +241,14 @@ jobs:
           path: checkov-results/
         continue-on-error: true
 
+      - name: Debug — listar ficheros descargados
+        run: |
+          echo "=== trivy-image-sarif/ ==="
+          ls -la trivy-image-sarif/ 2>/dev/null || echo "vacío o no existe"
+          echo "=== checkov-results/ ==="
+          ls -la checkov-results/ 2>/dev/null || echo "vacío o no existe"
+          find . -name "*.sarif" 2>/dev/null
+
       - name: Generate dashboard HTML
         run: |
           python3 scripts/generate_dashboard.py
@@ -263,3 +271,41 @@ jobs:
 
           echo "### 🔒 Security Dashboard Published" >> $GITHUB_STEP_SUMMARY
           echo "**URL:** http://${{ secrets.S3_DASHBOARD_BUCKET }}.s3-website-eu-west-1.amazonaws.com" >> $GITHUB_STEP_SUMMARY
+
+  conftest-policy-check:
+    name: Conftest — Policy Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Conftest
+        run: |
+          CONFTEST_VERSION="0.56.0"
+          wget -q https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
+          tar xzf conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+          conftest --version
+
+      - name: Run Conftest on Kubernetes manifests
+        run: |
+          echo "### 📋 Policy Validation Results" >> $GITHUB_STEP_SUMMARY
+
+          conftest test k8s/ \
+            --policy policies/kubernetes/ \
+            --all-namespaces \
+            --recursive \
+            --output github \
+            2>&1 | tee conftest-output.txt
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat conftest-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Conftest results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conftest-results
+          path: conftest-output.txt
