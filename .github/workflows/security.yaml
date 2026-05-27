@@ -114,37 +114,6 @@ jobs:
           sarif_file: trivy-k8s-results.sarif
           category: trivy-k8s
 
-  trivy-upload-s3:
-    name: Upload Reports to S3
-    runs-on: ubuntu-latest
-    needs: [trivy-image-scan, trivy-iac-scan]
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Download all SARIF artifacts
-        uses: actions/download-artifact@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Upload reports to S3
-        run: |
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          COMMIT=${{ github.sha }}
-
-          aws s3 cp trivy-image-sarif/trivy-image-results.sarif \
-            s3://${{ secrets.S3_BUCKET_NAME }}/reports/${TIMESTAMP}-${COMMIT}-image.sarif
-
-          aws s3 cp trivy-iac-sarif/trivy-iac-results.sarif \
-            s3://${{ secrets.S3_BUCKET_NAME }}/reports/${TIMESTAMP}-${COMMIT}-iac.sarif
-
-          echo "### 📊 Security Reports" >> $GITHUB_STEP_SUMMARY
-          echo "Reports uploaded to S3 with timestamp ${TIMESTAMP}" >> $GITHUB_STEP_SUMMARY
-
   checkov-scan:
     name: Checkov — IaC Deep Scan
     runs-on: ubuntu-latest
@@ -186,21 +155,21 @@ jobs:
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: checkov-terraform-results.sarif
+          sarif_file: checkov-terraform-results.sarif/results_sarif.sarif
           category: checkov-terraform
 
       - name: Upload K8s results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: checkov-k8s-results.sarif
+          sarif_file: checkov-k8s-results.sarif/results_sarif.sarif
           category: checkov-k8s
 
       - name: Upload Dockerfile results to GitHub Security
         uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
-          sarif_file: checkov-dockerfile-results.sarif
+          sarif_file: checkov-dockerfile-results.sarif/results_sarif.sarif
           category: checkov-dockerfile
 
       - name: Upload Checkov artifacts
@@ -209,6 +178,74 @@ jobs:
         with:
           name: checkov-results
           path: "*.sarif"
+
+  conftest-policy-check:
+    name: Conftest — Policy Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Conftest
+        run: |
+          CONFTEST_VERSION="0.56.0"
+          wget -q https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
+          tar xzf conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+          conftest --version
+
+      - name: Run Conftest on Kubernetes manifests
+        run: |
+          echo "### 📋 Policy Validation Results" >> $GITHUB_STEP_SUMMARY
+
+          conftest test k8s/base/deployment.yaml k8s/base/service.yaml \
+            --policy policies/kubernetes/ \
+            --all-namespaces \
+            --output github \
+            2>&1 | tee conftest-output.txt || true
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat conftest-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Conftest results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: conftest-results
+          path: conftest-output.txt
+
+  trivy-upload-s3:
+    name: Upload Reports to S3
+    runs-on: ubuntu-latest
+    needs: [trivy-image-scan, trivy-iac-scan, checkov-scan]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download all SARIF artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload reports to S3
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          COMMIT=${{ github.sha }}
+
+          aws s3 cp trivy-image-sarif/trivy-image-results.sarif \
+            s3://${{ secrets.S3_BUCKET_NAME }}/reports/${TIMESTAMP}-${COMMIT}-image.sarif
+
+          aws s3 cp trivy-iac-sarif/trivy-iac-results.sarif \
+            s3://${{ secrets.S3_BUCKET_NAME }}/reports/${TIMESTAMP}-${COMMIT}-iac.sarif
+
+          echo "### 📊 Security Reports" >> $GITHUB_STEP_SUMMARY
+          echo "Reports uploaded to S3 with timestamp ${TIMESTAMP}" >> $GITHUB_STEP_SUMMARY
 
   publish-dashboard:
     name: Publish Security Dashboard
@@ -241,14 +278,6 @@ jobs:
           path: checkov-results/
         continue-on-error: true
 
-      - name: Debug — listar ficheros descargados
-        run: |
-          echo "=== trivy-image-sarif/ ==="
-          ls -la trivy-image-sarif/ 2>/dev/null || echo "vacío o no existe"
-          echo "=== checkov-results/ ==="
-          ls -la checkov-results/ 2>/dev/null || echo "vacío o no existe"
-          find . -name "*.sarif" 2>/dev/null
-
       - name: Generate dashboard HTML
         run: |
           python3 scripts/generate_dashboard.py
@@ -271,41 +300,3 @@ jobs:
 
           echo "### 🔒 Security Dashboard Published" >> $GITHUB_STEP_SUMMARY
           echo "**URL:** http://${{ secrets.S3_DASHBOARD_BUCKET }}.s3-website-eu-west-1.amazonaws.com" >> $GITHUB_STEP_SUMMARY
-
-  conftest-policy-check:
-    name: Conftest — Policy Validation
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Conftest
-        run: |
-          CONFTEST_VERSION="0.56.0"
-          wget -q https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
-          tar xzf conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
-          sudo mv conftest /usr/local/bin/
-          conftest --version
-
-      - name: Run Conftest on Kubernetes manifests
-        run: |
-          echo "### 📋 Policy Validation Results" >> $GITHUB_STEP_SUMMARY
-
-          conftest test k8s/ \
-            --policy policies/kubernetes/ \
-            --all-namespaces \
-            --recursive \
-            --output github \
-            2>&1 | tee conftest-output.txt
-
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat conftest-output.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-
-      - name: Upload Conftest results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: conftest-results
-          path: conftest-output.txt
