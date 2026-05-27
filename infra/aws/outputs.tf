@@ -18,3 +18,13 @@ output "github_actions_secret_key" {
 output "lambda_function_name" {
   value = aws_lambda_function.security_agent.function_name
 }
+
+output "dashboard_bucket_name" {
+  description = "Nombre del bucket del dashboard"
+  value       = aws_s3_bucket.security_dashboard.id
+}
+
+output "dashboard_url" {
+  description = "URL pública del security dashboard"
+  value       = "http://${aws_s3_bucket.security_dashboard.id}.s3-website-${var.aws_region}.amazonaws.com"
+}

@@ -22,7 +22,9 @@ resource "aws_iam_user_policy" "github_actions" {
         ]
         Resource = [
           aws_s3_bucket.security_reports.arn,
-          "${aws_s3_bucket.security_reports.arn}/*"
+          "${aws_s3_bucket.security_reports.arn}/*",
+          aws_s3_bucket.security_dashboard.arn,
+          "${aws_s3_bucket.security_dashboard.arn}/*"
         ]
       },
       {
