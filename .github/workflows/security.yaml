@@ -8,7 +8,7 @@ on:
 
 permissions:
   contents: read
-  security-events: write  # necesario para subir SARIF a GitHub Security
+  security-events: write
 
 jobs:
   trivy-image-scan:
@@ -19,6 +19,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set image name lowercase
+        id: image
+        run: |
+          IMAGE="ghcr.io/${{ github.repository_owner }}/demo-web:latest"
+          echo "name=${IMAGE,,}" >> $GITHUB_OUTPUT
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -27,20 +33,19 @@ jobs:
           password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Pull image
-        run: docker pull ghcr.io/${{ github.repository_owner }}/demo-web:latest
+        run: docker pull ${{ steps.image.outputs.name }}
 
-      - name: Trivy — scan container image
+      - name: Trivy — scan container image (SARIF)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/demo-web:latest
+          image-ref: ${{ steps.image.outputs.name }}
           format: sarif
           output: trivy-image-results.sarif
-          # No falla el pipeline aquí — primero subimos el reporte
           exit-code: '0'
           severity: CRITICAL,HIGH
 
-      - name: Upload image scan results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload image scan to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-image-results.sarif
@@ -53,10 +58,10 @@ jobs:
           name: trivy-image-sarif
           path: trivy-image-results.sarif
 
-      - name: Trivy — fail on CRITICAL vulnerabilities
+      - name: Trivy — fail on CRITICAL (unfixed)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/demo-web:latest
+          image-ref: ${{ steps.image.outputs.name }}
           format: table
           exit-code: '1'
           severity: CRITICAL
@@ -79,8 +84,8 @@ jobs:
           output: trivy-iac-results.sarif
           exit-code: '0'
 
-      - name: Upload IaC scan results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload IaC scan to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-iac-results.sarif
@@ -102,8 +107,8 @@ jobs:
           output: trivy-k8s-results.sarif
           exit-code: '0'
 
-      - name: Upload K8s scan results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload K8s scan to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-k8s-results.sarif
