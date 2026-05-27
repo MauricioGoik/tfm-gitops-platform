@@ -115,13 +115,13 @@ jobs:
 
       - name: Scan SBOM with Grype CLI
         # Usamos CLI directamente para tener control total sobre el output
-        # --fail-on disabled para que no bloquee el pipeline
+        # --fail-on negligible para que no bloquee el pipeline
         # la salida SARIF la redirigimos nosotros al fichero que queremos
         run: |
           grype sbom:demo-web-sbom.spdx.json \
             --output sarif \
             --file grype-sbom-results.sarif \
-            --fail-on disabled
+            --fail-on negligible
           echo "=== Grype SARIF generado ==="
           ls -lh grype-sbom-results.sarif
           echo "=== Primeras líneas del SARIF ==="
