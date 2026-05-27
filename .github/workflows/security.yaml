@@ -144,3 +144,68 @@ jobs:
 
           echo "### 📊 Security Reports" >> $GITHUB_STEP_SUMMARY
           echo "Reports uploaded to S3 with timestamp ${TIMESTAMP}" >> $GITHUB_STEP_SUMMARY
+
+  checkov-scan:
+    name: Checkov — IaC Deep Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov on Terraform
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: infra/aws/
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-terraform-results.sarif
+          soft_fail: true
+          external_checks_dir: policies/checkov/
+
+      - name: Run Checkov on Kubernetes
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: k8s/
+          framework: kubernetes
+          output_format: sarif
+          output_file_path: checkov-k8s-results.sarif
+          soft_fail: true
+          external_checks_dir: policies/checkov/
+
+      - name: Run Checkov on Dockerfile
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: apps/
+          framework: dockerfile
+          output_format: sarif
+          output_file_path: checkov-dockerfile-results.sarif
+          soft_fail: true
+
+      - name: Upload Terraform results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: checkov-terraform-results.sarif
+          category: checkov-terraform
+
+      - name: Upload K8s results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: checkov-k8s-results.sarif
+          category: checkov-k8s
+
+      - name: Upload Dockerfile results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: checkov-dockerfile-results.sarif
+          category: checkov-dockerfile
+
+      - name: Upload Checkov artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkov-results
+          path: "*.sarif"
