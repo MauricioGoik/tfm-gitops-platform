@@ -64,7 +64,6 @@ jobs:
           echo "### 🐳 Image Published" >> $GITHUB_STEP_SUMMARY
           echo "**Registry:** ghcr.io" >> $GITHUB_STEP_SUMMARY
           echo "**Image:** ${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Tags:** ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
 
   generate-sbom:
     name: Generate SBOM
@@ -93,9 +92,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
 
-      - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0
-
       - name: Generate SBOM (SPDX JSON)
         uses: anchore/sbom-action@v0
         with:
@@ -113,6 +109,30 @@ jobs:
           output-file: demo-web-sbom.cyclonedx.json
           upload-artifact: true
           upload-artifact-retention: 30
+
+      - name: Install Grype CLI
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Scan SBOM with Grype CLI
+        # Usamos CLI directamente para tener control total sobre el output
+        # --fail-on disabled para que no bloquee el pipeline
+        # la salida SARIF la redirigimos nosotros al fichero que queremos
+        run: |
+          grype sbom:demo-web-sbom.spdx.json \
+            --output sarif \
+            --file grype-sbom-results.sarif \
+            --fail-on disabled
+          echo "=== Grype SARIF generado ==="
+          ls -lh grype-sbom-results.sarif
+          echo "=== Primeras líneas del SARIF ==="
+          head -5 grype-sbom-results.sarif
+
+      - name: Upload Grype results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: grype-sbom-results.sarif
+          category: grype-sbom
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -132,24 +152,11 @@ jobs:
           aws s3 cp demo-web-sbom.cyclonedx.json \
             s3://${{ secrets.S3_BUCKET_NAME }}/sboms/${TIMESTAMP}-${COMMIT}-cyclonedx.json
 
+          aws s3 cp grype-sbom-results.sarif \
+            s3://${{ secrets.S3_BUCKET_NAME }}/sboms/${TIMESTAMP}-${COMMIT}-grype.sarif
+
           echo "### 📋 SBOM Generated" >> $GITHUB_STEP_SUMMARY
           echo "**Image:** ${{ steps.image.outputs.name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Formats:** SPDX JSON + CycloneDX JSON" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${COMMIT}" >> $GITHUB_STEP_SUMMARY
-          echo "SBOMs uploaded to S3 under \`sboms/\`" >> $GITHUB_STEP_SUMMARY
-
-      - name: Scan SBOM for vulnerabilities with Grype
-        uses: anchore/scan-action@v4
-        with:
-          sbom: demo-web-sbom.spdx.json
-          output-format: sarif
-          output-file: grype-sbom-results.sarif
-          fail-build: false
-        continue-on-error: true
-
-      - name: Upload Grype results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v4
-        if: always()
-        with:
-          sarif_file: grype-sbom-results.sarif
-          category: grype-sbom
+          echo "SBOMs + Grype report uploaded to S3 under \`sboms/\`" >> $GITHUB_STEP_SUMMARY
