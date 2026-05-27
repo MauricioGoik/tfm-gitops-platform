@@ -35,8 +35,36 @@ graph LR
 
 ## 📋 Estado del proyecto
 
-- [ ] Fase 1 — GitOps Foundation
+- [x] Fase 1 — GitOps Foundation ✅
 - [ ] Fase 2 — Security Scanning
 - [ ] Fase 3 — Policy-as-Code
 - [ ] Fase 4 — AI Agent
 - [ ] Fase 5 — Documentación
+
+## 🚀 Setup rápido
+
+```bash
+# 1. Levantar el clúster
+kind create cluster --config kind-config.yaml
+
+# 2. Instalar ArgoCD
+helm repo add argo https://argoproj.github.io/argo-helm
+helm install argocd argo/argo-cd --namespace argocd --create-namespace
+
+# 3. Acceder a ArgoCD
+kubectl port-forward svc/argocd-server -n argocd 8080:80
+
+# 4. Infraestructura AWS
+cd infra/aws && terraform apply
+```
+
+## 📁 Estructura del repositorio
+tfm-gitops-platform/
+├── apps/demo-web/        # Aplicación demo (Flask + Docker)
+├── k8s/                  # Manifiestos Kubernetes (Kustomize)
+│   ├── base/             # Definición base
+│   └── overlays/dev/     # Configuración de entorno dev
+├── infra/aws/            # Infraestructura AWS (Terraform)
+├── policies/             # Políticas OPA/Rego
+├── agent/                # Agente IA (Python)
+└── .github/workflows/    # Pipelines CI/CD
