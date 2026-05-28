@@ -300,3 +300,59 @@ jobs:
 
           echo "### 🔒 Security Dashboard Published" >> $GITHUB_STEP_SUMMARY
           echo "**URL:** http://${{ secrets.S3_DASHBOARD_BUCKET }}.s3-website-eu-west-1.amazonaws.com" >> $GITHUB_STEP_SUMMARY
+
+  terraform-policy-check:
+    name: OPA — Terraform Policy Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Install Conftest
+        run: |
+          CONFTEST_VERSION="0.56.0"
+          wget -q https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
+          tar xzf conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+
+      - name: Terraform Init
+        working-directory: infra/aws
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: infra/aws
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          terraform plan -out=tfplan.binary
+          terraform show -json tfplan.binary > tfplan.json
+
+      - name: OPA Policy Check on Terraform Plan
+        working-directory: infra/aws
+        run: |
+          echo "### 🏗️ Terraform Policy Results" >> $GITHUB_STEP_SUMMARY
+
+          conftest test tfplan.json \
+            --policy ../../policies/terraform/ \
+            --namespace terraform \
+            --all-namespaces \
+            --output github \
+            2>&1 | tee terraform-policy-output.txt || true
+
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat terraform-policy-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: terraform-policy-results
+          path: infra/aws/terraform-policy-output.txt
