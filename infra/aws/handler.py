@@ -7,6 +7,7 @@ y genera fixes automáticos via Pull Request
 import json
 import os
 import re
+import base64
 import requests
 
 
@@ -39,9 +40,7 @@ def call_groq(prompt: str, system: str) -> str:
 
 
 def analyze_vulnerability(vuln: dict) -> dict:
-    """
-    Analiza una vulnerabilidad y genera un fix recomendado.
-    """
+    """Analiza una vulnerabilidad y genera un fix recomendado."""
     system = """Eres un experto en seguridad DevSecOps.
     Analizas vulnerabilidades en contenedores Docker y generas fixes concisos.
     Responde SIEMPRE en este formato JSON exacto, sin texto adicional:
@@ -95,16 +94,58 @@ def create_github_pr(analysis: dict, vuln: dict, repo: str, token: str) -> str:
     r.raise_for_status()
     main_sha = r.json()["object"]["sha"]
 
-    # Crear branch
-    branch_name = f"fix/security-{vuln.get('cve_id', 'vuln').lower().replace('/', '-')}-{main_sha[:7]}"
+    # Nombre de la rama
+    cve_safe = vuln.get('cve_id', 'vuln').lower().replace('/', '-')
+    branch_name = f"fix/security-{cve_safe}-{main_sha[:7]}"
 
-    requests.post(
+    # Crear rama
+    r = requests.post(
         f"https://api.github.com/repos/{repo}/git/refs",
         headers=headers,
         json={"ref": f"refs/heads/{branch_name}", "sha": main_sha}
     )
+    if r.status_code not in [201, 422]:
+        r.raise_for_status()
+    print(f"Branch: {branch_name}")
 
-    print(f"Branch creado: {branch_name}")
+    # Crear fichero de evidencia en la rama
+    # Esto es necesario para que GitHub permita abrir el PR
+    report_content = json.dumps({
+        "cve_id": vuln.get("cve_id"),
+        "package": vuln.get("package"),
+        "current_version": vuln.get("version"),
+        "fixed_version": vuln.get("fixed_version"),
+        "severity": vuln.get("severity"),
+        "analysis": analysis,
+        "status": "pending_fix"
+    }, indent=2)
+
+    file_path = f"security-reports/{vuln.get('cve_id', 'vuln').replace('/', '-')}.json"
+
+    # Verificar si el fichero ya existe en main
+    r = requests.get(
+        f"https://api.github.com/repos/{repo}/contents/{file_path}",
+        headers=headers,
+        params={"ref": branch_name}
+    )
+    existing_sha = r.json().get("sha") if r.status_code == 200 else None
+
+    # Crear o actualizar el fichero en la rama
+    payload = {
+        "message": f"security: add vulnerability report for {vuln.get('cve_id')}",
+        "content": base64.b64encode(report_content.encode()).decode(),
+        "branch": branch_name
+    }
+    if existing_sha:
+        payload["sha"] = existing_sha
+
+    r = requests.put(
+        f"https://api.github.com/repos/{repo}/contents/{file_path}",
+        headers=headers,
+        json=payload
+    )
+    r.raise_for_status()
+    print(f"Fichero creado en rama: {file_path}")
 
     # Cuerpo del PR
     pr_body = f"""## 🔒 Security Vulnerability Fix
@@ -140,7 +181,7 @@ def create_github_pr(analysis: dict, vuln: dict, repo: str, token: str) -> str:
         f"https://api.github.com/repos/{repo}/pulls",
         headers=headers,
         json={
-            "title": analysis.get('pr_title', f"fix: address {vuln.get('cve_id', 'vulnerability')}"),
+            "title": analysis.get('pr_title', f"fix: address {vuln.get('cve_id')}"),
             "body": pr_body,
             "head": branch_name,
             "base": "main"
@@ -151,16 +192,7 @@ def create_github_pr(analysis: dict, vuln: dict, repo: str, token: str) -> str:
 
 
 def handler(event, context):
-    """
-    Lambda handler principal.
-
-    Evento esperado:
-    {
-        "vulnerabilities": [...],
-        "repo": "usuario/repo",
-        "github_token": "ghp_..."
-    }
-    """
+    """Lambda handler principal."""
     print(f"Event received: {json.dumps(event)}")
 
     vulnerabilities = event.get("vulnerabilities", [])
