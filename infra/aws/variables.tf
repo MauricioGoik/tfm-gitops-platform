@@ -15,3 +15,9 @@ variable "project_name" {
   type        = string
   default     = "tfm-gitops-platform"
 }
+
+variable "groq_api_key" {
+  description = "API key de Groq para el agente IA"
+  type        = string
+  sensitive   = true
+}
