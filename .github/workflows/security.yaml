@@ -373,13 +373,7 @@ jobs:
             trivy-image-sarif/trivy-image-results.sarif \
             3 \
             /tmp/vulnerabilities.json
-
-          VULN_COUNT=$(python3 -c "
-import json
-data = json.load(open('/tmp/vulnerabilities.json'))
-print(len(data) if isinstance(data, list) else 0)
-          ")
-
+          VULN_COUNT=$(python3 scripts/count_vulns.py /tmp/vulnerabilities.json)
           echo "vuln_count=${VULN_COUNT}" >> $GITHUB_OUTPUT
           echo "Found ${VULN_COUNT} vulnerabilities to process"
 
@@ -394,18 +388,10 @@ print(len(data) if isinstance(data, list) else 0)
       - name: Invoke AI Agent Lambda
         if: steps.parse.outputs.vuln_count != '0'
         run: |
-          PAYLOAD=$(python3 -c "
-import json
-vulns = json.load(open('/tmp/vulnerabilities.json'))
-if not isinstance(vulns, list):
-    vulns = []
-payload = {
-    'vulnerabilities': vulns,
-    'repo': '${{ github.repository }}',
-    'github_token': '${{ secrets.AGENT_GITHUB_TOKEN }}'
-}
-print(json.dumps(payload))
-          ")
+          PAYLOAD=$(python3 scripts/build_lambda_payload.py \
+            /tmp/vulnerabilities.json \
+            "${{ github.repository }}" \
+            "${{ secrets.AGENT_GITHUB_TOKEN }}")
 
           aws lambda invoke \
             --function-name tfm-gitops-platform-security-agent \
@@ -416,19 +402,7 @@ print(json.dumps(payload))
 
           echo "=== Agent Response ==="
           cat /tmp/agent-response.json
-
-          python3 -c "
-import json
-resp = json.load(open('/tmp/agent-response.json'))
-body = json.loads(resp.get('body', '{}'))
-results = body.get('results', [])
-print('### 🤖 AI Agent Results')
-for r in results:
-    if r.get('pr_url'):
-        print(f'- PR created: {r[\"pr_url\"]}')
-    elif r.get('error'):
-        print(f'- Error for {r[\"cve_id\"]}: {r[\"error\"]}')
-          " >> $GITHUB_STEP_SUMMARY
+          python3 scripts/print_agent_results.py /tmp/agent-response.json >> $GITHUB_STEP_SUMMARY
 
       - name: Skip agent
         if: steps.parse.outputs.vuln_count == '0'
