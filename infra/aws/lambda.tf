@@ -16,25 +16,50 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Generamos el zip directamente desde un string, sin depender de /tmp local
+# Layer desde S3
+resource "aws_lambda_layer_version" "python_deps" {
+  s3_bucket           = aws_s3_bucket.security_reports.id
+  s3_key              = "lambda/lambda_layer.zip"
+  layer_name          = "${var.project_name}-python-deps"
+  compatible_runtimes = ["python3.13"]
+  description         = "requests and dependencies for security agent"
+}
+
+# Función Lambda desde S3
+resource "aws_s3_object" "lambda_agent_code" {
+  bucket = aws_s3_bucket.security_reports.id
+  key    = "lambda/lambda_agent.zip"
+  source = "${path.module}/lambda_agent.zip"
+  etag   = filemd5("${path.module}/lambda_agent.zip")
+}
+
+data "archive_file" "lambda_agent" {
+  type        = "zip"
+  output_path = "${path.module}/lambda_agent.zip"
+  source {
+    content  = file("${path.module}/../../agent/handler.py")
+    filename = "handler.py"
+  }
+}
+
 resource "aws_lambda_function" "security_agent" {
-  filename         = "${path.module}/lambda_placeholder.zip"
+  s3_bucket        = aws_s3_bucket.security_reports.id
+  s3_key           = "lambda/lambda_agent.zip"
   function_name    = "${var.project_name}-security-agent"
   role             = aws_iam_role.lambda_agent.arn
   handler          = "handler.handler"
   runtime          = "python3.13"
   timeout          = 60
   memory_size      = 256
+  source_code_hash = data.archive_file.lambda_agent.output_base64sha256
 
-  source_code_hash = data.archive_file.lambda_placeholder.output_base64sha256
-}
+  layers = [aws_lambda_layer_version.python_deps.arn]
 
-data "archive_file" "lambda_placeholder" {
-  type        = "zip"
-  output_path = "${path.module}/lambda_placeholder.zip"
-
-  source {
-    content  = "def handler(event, context): return {'statusCode': 200, 'body': 'placeholder'}"
-    filename = "handler.py"
+  environment {
+    variables = {
+      GROQ_API_KEY = var.groq_api_key
+    }
   }
+
+  depends_on = [aws_s3_object.lambda_agent_code]
 }
