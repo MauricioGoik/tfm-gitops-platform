@@ -20,7 +20,7 @@ spec:
         runAsUser: 1000
       containers:
         - name: demo-web
-          image: ghcr.io/mauriciogoik/demo-web:sha-placeholder
+          image: ghcr.io/mauriciogoik/demo-web:latest
           ports:
             - containerPort: 8080
           resources:
