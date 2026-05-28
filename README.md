@@ -191,5 +191,5 @@ Ver docs/adr/ para las Architecture Decision Records completas.
 
 **Mauricio Goik** — Máster Multicloud & DevOps
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-blue)](https://linkedin.com/in/tu-perfil)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Connect-blue)](https://linkedin.com/in/mauriciogoik/)
 [![GitHub](https://img.shields.io/badge/GitHub-Follow-black)](https://github.com/MauricioGoik)
