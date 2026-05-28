@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-Parsea el output SARIF de Trivy y extrae vulnerabilidades
-HIGH y CRITICAL para pasarlas al agente IA.
-"""
-
 import json
 import sys
 import os
@@ -17,7 +12,8 @@ def parse_trivy_sarif(sarif_path: str, max_vulns: int = 3) -> list:
     with open(sarif_path) as f:
         sarif = json.load(f)
 
-    vulnerabilities = []
+    python_vulns = []
+    os_vulns = []
     seen_cves = set()
 
     for run in sarif.get("runs", []):
@@ -38,7 +34,7 @@ def parse_trivy_sarif(sarif_path: str, max_vulns: int = 3) -> list:
             seen_cves.add(rule_id)
 
             rule = rules.get(rule_id, {})
-            properties = rule.get("properties", {})
+            message = result.get("message", {}).get("text", "")
             help_text = rule.get("help", {}).get("text", "")
 
             fixed_version = "unknown"
@@ -50,9 +46,6 @@ def parse_trivy_sarif(sarif_path: str, max_vulns: int = 3) -> list:
 
             severity = "CRITICAL" if level == "error" else "HIGH"
 
-            message = result.get("message", {}).get("text", "")
-
-            # Extraer nombre del paquete del mensaje
             package_name = "unknown"
             for line in message.split("\n"):
                 if line.startswith("Package:"):
@@ -65,25 +58,40 @@ def parse_trivy_sarif(sarif_path: str, max_vulns: int = 3) -> list:
                     version = line.replace("Installed Version:", "").strip()
                     break
 
+            # Detectar si es paquete Python mirando las locations del SARIF
+            locations = result.get("locations", [])
+            is_python = False
+            for loc in locations:
+                uri = loc.get("physicalLocation", {}).get(
+                    "artifactLocation", {}).get("uri", "")
+                if "site-packages" in uri or "python" in uri.lower():
+                    is_python = True
+                    break
+
             vuln = {
                 "cve_id": rule_id,
                 "package": package_name,
                 "version": version,
                 "fixed_version": fixed_version,
                 "severity": severity,
-                "image": os.getenv("IMAGE_NAME", "ghcr.io/mauriciogoik/demo-web:latest"),
-                "description": message[:200]
+                "image": os.getenv(
+                    "IMAGE_NAME",
+                    "ghcr.io/mauriciogoik/demo-web:latest"
+                ),
+                "description": message[:200],
+                "is_python": is_python
             }
 
-            vulnerabilities.append(vuln)
+            if is_python:
+                python_vulns.append(vuln)
+                print(f"Python vuln: {rule_id} in {package_name}", file=sys.stderr)
+            else:
+                os_vulns.append(vuln)
+                print(f"OS vuln: {rule_id} in {package_name}", file=sys.stderr)
 
-            if len(vulnerabilities) >= max_vulns:
-                break
-
-        if len(vulnerabilities) >= max_vulns:
-            break
-
-    return vulnerabilities
+    # Priorizar Python sobre OS
+    all_vulns = python_vulns + os_vulns
+    return all_vulns[:max_vulns]
 
 
 if __name__ == "__main__":
@@ -93,10 +101,8 @@ if __name__ == "__main__":
 
     vulns = parse_trivy_sarif(sarif_path, max_vulns)
 
-    # Siempre imprime el conteo en stderr para no contaminar stdout
     print(f"Found {len(vulns)} vulnerabilities", file=sys.stderr)
 
-    # JSON puro en stdout o en fichero
     if output_path:
         with open(output_path, "w") as f:
             json.dump(vulns, f, indent=2)
