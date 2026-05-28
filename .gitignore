@@ -54,3 +54,8 @@ venv/
 # Secrets
 *.pem
 *.key
+
+# Lambda build artifacts
+agent/layer/
+infra/aws/lambda_agent.zip
+infra/aws/lambda_layer.zip
