@@ -356,3 +356,99 @@ jobs:
         with:
           name: terraform-policy-results
           path: infra/aws/terraform-policy-output.txt
+
+  ai-remediation-agent:
+    name: AI — Security Remediation Agent
+    runs-on: ubuntu-latest
+    needs: [trivy-image-scan]
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Trivy image SARIF
+        uses: actions/download-artifact@v4
+        with:
+          name: trivy-image-sarif
+          path: trivy-image-sarif/
+
+      - name: Parse vulnerabilities from SARIF
+        id: parse
+        run: |
+          python3 scripts/parse_trivy_sarif.py \
+            trivy-image-sarif/trivy-image-results.sarif \
+            3 > /tmp/vulnerabilities.json
+
+          cat /tmp/vulnerabilities.json
+
+          VULN_COUNT=$(python3 -c "
+          import json
+          data = json.load(open('/tmp/vulnerabilities.json'))
+          if isinstance(data, list):
+              print(len(data))
+          else:
+              print(0)
+          ")
+
+          echo "vuln_count=${VULN_COUNT}" >> $GITHUB_OUTPUT
+          echo "Found ${VULN_COUNT} vulnerabilities to process"
+
+      - name: Configure AWS credentials
+        if: steps.parse.outputs.vuln_count != '0'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Invoke AI Agent Lambda
+        if: steps.parse.outputs.vuln_count != '0'
+        run: |
+          VULNERABILITIES=$(cat /tmp/vulnerabilities.json)
+
+          PAYLOAD=$(python3 -c "
+          import json, sys
+          vulns = json.loads(open('/tmp/vulnerabilities.json').read())
+          if not isinstance(vulns, list):
+              vulns = []
+          payload = {
+              'vulnerabilities': vulns,
+              'repo': '${{ github.repository }}',
+              'github_token': '${{ secrets.AGENT_GITHUB_TOKEN }}'
+          }
+          print(json.dumps(payload))
+          ")
+
+          echo "Invoking Lambda with ${#PAYLOAD} bytes payload"
+
+          aws lambda invoke \
+            --function-name tfm-gitops-platform-security-agent \
+            --cli-binary-format raw-in-base64-out \
+            --payload "$PAYLOAD" \
+            --region ${{ secrets.AWS_REGION }} \
+            /tmp/agent-response.json
+
+          echo "=== Agent Response ==="
+          cat /tmp/agent-response.json
+
+          # Extraer URLs de PRs creados
+          python3 -c "
+          import json
+          resp = json.load(open('/tmp/agent-response.json'))
+          body = json.loads(resp.get('body', '{}'))
+          results = body.get('results', [])
+          print('### 🤖 AI Agent Results') 
+          for r in results:
+              if r.get('pr_url'):
+                  print(f'- PR created: {r[\"pr_url\"]}')
+              elif r.get('error'):
+                  print(f'- Error for {r[\"cve_id\"]}: {r[\"error\"]}')
+          " >> $GITHUB_STEP_SUMMARY
+
+      - name: Skip agent
+        if: steps.parse.outputs.vuln_count == '0'
+        run: echo "No HIGH/CRITICAL vulnerabilities found, skipping agent"
