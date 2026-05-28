@@ -193,18 +193,15 @@ jobs:
           wget -q https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
           tar xzf conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz
           sudo mv conftest /usr/local/bin/
-          conftest --version
 
       - name: Run Conftest on Kubernetes manifests
         run: |
           echo "### 📋 Policy Validation Results" >> $GITHUB_STEP_SUMMARY
-
           conftest test k8s/base/deployment.yaml k8s/base/service.yaml \
             --policy policies/kubernetes/ \
             --all-namespaces \
             --output github \
             2>&1 | tee conftest-output.txt || true
-
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat conftest-output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -215,91 +212,6 @@ jobs:
         with:
           name: conftest-results
           path: conftest-output.txt
-
-  trivy-upload-s3:
-    name: Upload Reports to S3
-    runs-on: ubuntu-latest
-    needs: [trivy-image-scan, trivy-iac-scan, checkov-scan]
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Download all SARIF artifacts
-        uses: actions/download-artifact@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Upload reports to S3
-        run: |
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          COMMIT=${{ github.sha }}
-
-          aws s3 cp trivy-image-sarif/trivy-image-results.sarif \
-            s3://${{ secrets.S3_BUCKET_NAME }}/reports/${TIMESTAMP}-${COMMIT}-image.sarif
-
-          aws s3 cp trivy-iac-sarif/trivy-iac-results.sarif \
-            s3://${{ secrets.S3_BUCKET_NAME }}/reports/${TIMESTAMP}-${COMMIT}-iac.sarif
-
-          echo "### 📊 Security Reports" >> $GITHUB_STEP_SUMMARY
-          echo "Reports uploaded to S3 with timestamp ${TIMESTAMP}" >> $GITHUB_STEP_SUMMARY
-
-  publish-dashboard:
-    name: Publish Security Dashboard
-    runs-on: ubuntu-latest
-    needs: [trivy-image-scan, trivy-iac-scan, checkov-scan]
-    if: github.ref == 'refs/heads/main'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download Trivy image SARIF
-        uses: actions/download-artifact@v4
-        with:
-          name: trivy-image-sarif
-          path: trivy-image-sarif/
-        continue-on-error: true
-
-      - name: Download Trivy IaC SARIF
-        uses: actions/download-artifact@v4
-        with:
-          name: trivy-iac-sarif
-          path: trivy-iac-sarif/
-        continue-on-error: true
-
-      - name: Download Checkov results
-        uses: actions/download-artifact@v4
-        with:
-          name: checkov-results
-          path: checkov-results/
-        continue-on-error: true
-
-      - name: Generate dashboard HTML
-        run: |
-          python3 scripts/generate_dashboard.py
-          echo "=== Dashboard generado ==="
-          ls -lh index.html
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Publish dashboard to S3
-        run: |
-          aws s3 cp index.html \
-            s3://${{ secrets.S3_DASHBOARD_BUCKET }}/index.html \
-            --content-type "text/html" \
-            --cache-control "max-age=300"
-
-          echo "### 🔒 Security Dashboard Published" >> $GITHUB_STEP_SUMMARY
-          echo "**URL:** http://${{ secrets.S3_DASHBOARD_BUCKET }}.s3-website-eu-west-1.amazonaws.com" >> $GITHUB_STEP_SUMMARY
 
   terraform-policy-check:
     name: OPA — Terraform Policy Check
@@ -338,14 +250,12 @@ jobs:
         working-directory: infra/aws
         run: |
           echo "### 🏗️ Terraform Policy Results" >> $GITHUB_STEP_SUMMARY
-
           conftest test tfplan.json \
             --policy ../../policies/terraform/ \
             --namespace terraform \
             --all-namespaces \
             --output github \
             2>&1 | tee terraform-policy-output.txt || true
-
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat terraform-policy-output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -356,6 +266,86 @@ jobs:
         with:
           name: terraform-policy-results
           path: infra/aws/terraform-policy-output.txt
+
+  trivy-upload-s3:
+    name: Upload Reports to S3
+    runs-on: ubuntu-latest
+    needs: [trivy-image-scan, trivy-iac-scan, checkov-scan]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download all SARIF artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload reports to S3
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          COMMIT=${{ github.sha }}
+          aws s3 cp trivy-image-sarif/trivy-image-results.sarif \
+            s3://${{ secrets.S3_BUCKET_NAME }}/reports/${TIMESTAMP}-${COMMIT}-image.sarif
+          aws s3 cp trivy-iac-sarif/trivy-iac-results.sarif \
+            s3://${{ secrets.S3_BUCKET_NAME }}/reports/${TIMESTAMP}-${COMMIT}-iac.sarif
+          echo "### 📊 Security Reports" >> $GITHUB_STEP_SUMMARY
+          echo "Reports uploaded to S3 with timestamp ${TIMESTAMP}" >> $GITHUB_STEP_SUMMARY
+
+  publish-dashboard:
+    name: Publish Security Dashboard
+    runs-on: ubuntu-latest
+    needs: [trivy-image-scan, trivy-iac-scan, checkov-scan]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Trivy image SARIF
+        uses: actions/download-artifact@v4
+        with:
+          name: trivy-image-sarif
+          path: trivy-image-sarif/
+        continue-on-error: true
+
+      - name: Download Trivy IaC SARIF
+        uses: actions/download-artifact@v4
+        with:
+          name: trivy-iac-sarif
+          path: trivy-iac-sarif/
+        continue-on-error: true
+
+      - name: Download Checkov results
+        uses: actions/download-artifact@v4
+        with:
+          name: checkov-results
+          path: checkov-results/
+        continue-on-error: true
+
+      - name: Generate dashboard HTML
+        run: |
+          python3 scripts/generate_dashboard.py
+          ls -lh index.html
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Publish dashboard to S3
+        run: |
+          aws s3 cp index.html \
+            s3://${{ secrets.S3_DASHBOARD_BUCKET }}/index.html \
+            --content-type "text/html" \
+            --cache-control "max-age=300"
+          echo "### 🔒 Security Dashboard Published" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** http://${{ secrets.S3_DASHBOARD_BUCKET }}.s3-website-eu-west-1.amazonaws.com" >> $GITHUB_STEP_SUMMARY
 
   ai-remediation-agent:
     name: AI — Security Remediation Agent
@@ -381,17 +371,13 @@ jobs:
         run: |
           python3 scripts/parse_trivy_sarif.py \
             trivy-image-sarif/trivy-image-results.sarif \
-            3 > /tmp/vulnerabilities.json
-
-          cat /tmp/vulnerabilities.json
+            3 \
+            /tmp/vulnerabilities.json
 
           VULN_COUNT=$(python3 -c "
-          import json
-          data = json.load(open('/tmp/vulnerabilities.json'))
-          if isinstance(data, list):
-              print(len(data))
-          else:
-              print(0)
+import json
+data = json.load(open('/tmp/vulnerabilities.json'))
+print(len(data) if isinstance(data, list) else 0)
           ")
 
           echo "vuln_count=${VULN_COUNT}" >> $GITHUB_OUTPUT
@@ -408,22 +394,18 @@ jobs:
       - name: Invoke AI Agent Lambda
         if: steps.parse.outputs.vuln_count != '0'
         run: |
-          VULNERABILITIES=$(cat /tmp/vulnerabilities.json)
-
           PAYLOAD=$(python3 -c "
-          import json, sys
-          vulns = json.loads(open('/tmp/vulnerabilities.json').read())
-          if not isinstance(vulns, list):
-              vulns = []
-          payload = {
-              'vulnerabilities': vulns,
-              'repo': '${{ github.repository }}',
-              'github_token': '${{ secrets.AGENT_GITHUB_TOKEN }}'
-          }
-          print(json.dumps(payload))
+import json
+vulns = json.load(open('/tmp/vulnerabilities.json'))
+if not isinstance(vulns, list):
+    vulns = []
+payload = {
+    'vulnerabilities': vulns,
+    'repo': '${{ github.repository }}',
+    'github_token': '${{ secrets.AGENT_GITHUB_TOKEN }}'
+}
+print(json.dumps(payload))
           ")
-
-          echo "Invoking Lambda with ${#PAYLOAD} bytes payload"
 
           aws lambda invoke \
             --function-name tfm-gitops-platform-security-agent \
@@ -435,18 +417,17 @@ jobs:
           echo "=== Agent Response ==="
           cat /tmp/agent-response.json
 
-          # Extraer URLs de PRs creados
           python3 -c "
-          import json
-          resp = json.load(open('/tmp/agent-response.json'))
-          body = json.loads(resp.get('body', '{}'))
-          results = body.get('results', [])
-          print('### 🤖 AI Agent Results') 
-          for r in results:
-              if r.get('pr_url'):
-                  print(f'- PR created: {r[\"pr_url\"]}')
-              elif r.get('error'):
-                  print(f'- Error for {r[\"cve_id\"]}: {r[\"error\"]}')
+import json
+resp = json.load(open('/tmp/agent-response.json'))
+body = json.loads(resp.get('body', '{}'))
+results = body.get('results', [])
+print('### 🤖 AI Agent Results')
+for r in results:
+    if r.get('pr_url'):
+        print(f'- PR created: {r[\"pr_url\"]}')
+    elif r.get('error'):
+        print(f'- Error for {r[\"cve_id\"]}: {r[\"error\"]}')
           " >> $GITHUB_STEP_SUMMARY
 
       - name: Skip agent

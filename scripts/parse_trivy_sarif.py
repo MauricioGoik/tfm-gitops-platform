@@ -10,10 +10,8 @@ import os
 
 
 def parse_trivy_sarif(sarif_path: str, max_vulns: int = 3) -> list:
-    """Extrae vulnerabilidades HIGH/CRITICAL del SARIF de Trivy."""
-
     if not os.path.exists(sarif_path):
-        print(f"Error: {sarif_path} no existe")
+        print(f"Error: {sarif_path} no existe", file=sys.stderr)
         return []
 
     with open(sarif_path) as f:
@@ -32,11 +30,9 @@ def parse_trivy_sarif(sarif_path: str, max_vulns: int = 3) -> list:
             rule_id = result.get("ruleId", "")
             level = result.get("level", "")
 
-            # Solo HIGH y CRITICAL
             if level not in ["error", "warning"]:
                 continue
 
-            # Evitar duplicados
             if rule_id in seen_cves:
                 continue
             seen_cves.add(rule_id)
@@ -45,7 +41,6 @@ def parse_trivy_sarif(sarif_path: str, max_vulns: int = 3) -> list:
             properties = rule.get("properties", {})
             help_text = rule.get("help", {}).get("text", "")
 
-            # Extraer versión con fix del help text
             fixed_version = "unknown"
             if "fixed version:" in help_text.lower():
                 for line in help_text.split("\n"):
@@ -53,25 +48,30 @@ def parse_trivy_sarif(sarif_path: str, max_vulns: int = 3) -> list:
                         fixed_version = line.split(":")[-1].strip()
                         break
 
-            # Extraer severidad
-            severity = "HIGH"
-            if level == "error":
-                severity = "CRITICAL"
-            elif level == "warning":
-                severity = "HIGH"
+            severity = "CRITICAL" if level == "error" else "HIGH"
 
-            # Extraer nombre del paquete y versión del mensaje
             message = result.get("message", {}).get("text", "")
-            package_name = properties.get("affected_version", "unknown")
 
-            # El ruleId de Trivy es el CVE
+            # Extraer nombre del paquete del mensaje
+            package_name = "unknown"
+            for line in message.split("\n"):
+                if line.startswith("Package:"):
+                    package_name = line.replace("Package:", "").strip()
+                    break
+
+            version = "unknown"
+            for line in message.split("\n"):
+                if "Installed Version:" in line:
+                    version = line.replace("Installed Version:", "").strip()
+                    break
+
             vuln = {
                 "cve_id": rule_id,
-                "package": rule.get("name", rule_id),
-                "version": properties.get("affected_version", "unknown"),
+                "package": package_name,
+                "version": version,
                 "fixed_version": fixed_version,
                 "severity": severity,
-                "image": os.getenv("IMAGE_NAME", "unknown"),
+                "image": os.getenv("IMAGE_NAME", "ghcr.io/mauriciogoik/demo-web:latest"),
                 "description": message[:200]
             }
 
@@ -89,12 +89,17 @@ def parse_trivy_sarif(sarif_path: str, max_vulns: int = 3) -> list:
 if __name__ == "__main__":
     sarif_path = sys.argv[1] if len(sys.argv) > 1 else "trivy-image-results.sarif"
     max_vulns = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+    output_path = sys.argv[3] if len(sys.argv) > 3 else None
 
     vulns = parse_trivy_sarif(sarif_path, max_vulns)
 
-    if not vulns:
-        print("No HIGH/CRITICAL vulnerabilities found")
-        print(json.dumps([]))
+    # Siempre imprime el conteo en stderr para no contaminar stdout
+    print(f"Found {len(vulns)} vulnerabilities", file=sys.stderr)
+
+    # JSON puro en stdout o en fichero
+    if output_path:
+        with open(output_path, "w") as f:
+            json.dump(vulns, f, indent=2)
+        print(f"Written to {output_path}", file=sys.stderr)
     else:
-        print(f"Found {len(vulns)} vulnerabilities")
         print(json.dumps(vulns, indent=2))
