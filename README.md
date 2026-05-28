@@ -37,7 +37,7 @@ graph LR
 
 - [x] Fase 1 — GitOps Foundation ✅
 - [x] Fase 2 — Security Scanning ✅
-- [ ] Fase 3 — Policy-as-Code
+- [x] Fase 3 — Policy-as-Code ✅
 - [ ] Fase 4 — AI Agent
 - [ ] Fase 5 — Documentación
 
