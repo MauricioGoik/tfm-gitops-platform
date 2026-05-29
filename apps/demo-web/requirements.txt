@@ -1,2 +1,2 @@
-flask==2.0.0
+Flask==2.3.2
 # demo live - 29 mayo 2026
